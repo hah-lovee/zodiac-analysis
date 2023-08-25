@@ -1,4 +1,5 @@
 import telebot
+from telebot import types
 
 import csv
 import os
@@ -12,8 +13,8 @@ bot = telebot.TeleBot(token)
 user_states = {}
 
 QUESTIONS = [
-    "Введите ваш знак зодиака",
-    "Введите ваш пол",
+    "Выберите ваш знак зодиака",
+    "Выберите ваш пол",
     "Question 1: What is 2 + 2?",
     "Question 2: enter a number from 1 to 5",
     "Question 3: enter a number from 1 to 5",
@@ -43,11 +44,9 @@ zodiac_signs = [
     "рыбы",
 ]
 
+
 @bot.message_handler(commands=['start'])
 def start(message):
-    # markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    # btn1 = types.KeyboardButton("👋 Поздороваться")
-    # markup.add(btn1)
     bot.send_message(message.from_user.id, "Привет, предлагаю пройти тест."
                       "Для большей информации нажми на /help")
 
@@ -64,16 +63,13 @@ def test(message):
     user_states[message.chat.id]['answers'] = []
     ask_next_question(message.chat.id)
 
-def ask_next_question(chat_id):
+def ask_next_question(chat_id, message_id = None):
     question_number = user_states[chat_id]['current_question']
     if question_number < len(QUESTIONS):
         question = QUESTIONS[question_number]
-        # Добавить кнопки нормальные к вопросам
-        bot.send_message(chat_id, question)
-        user_states[chat_id]['waiting_for_answer'] = True
+        ask_question(chat_id=chat_id, question=question, message_id=message_id)
     else:
-        bot.send_message(chat_id, "Спасибо за ответы!")
-        user_states[chat_id]['waiting_for_answer'] = False
+        bot.edit_message_text(chat_id=chat_id, message_id=message_id, text="Спасибо за ответы!")
         print(user_states[chat_id]['answers'])
 
         with open("data.csv", mode="a", encoding='utf-8') as w_file:
@@ -82,44 +78,72 @@ def ask_next_question(chat_id):
         user_states[chat_id]['answers'] = []
 
 
-@bot.message_handler(func=lambda message: user_states.get(message.chat.id, {}).get('waiting_for_answer'))
-def reply_with_answer(message):
-    chat_id = message.chat.id
-    user_answer = message.text
-    validate_answers(chat_id, user_answer)
-    ask_next_question(chat_id)
-
-def validate_answers(chat_id, answer):
-    # обработка зз 
-    # сделать словарём, чтоб сразу кодировать в цифры
+def ask_question(chat_id, question, message_id):
     if user_states[chat_id]["current_question"] == 0:
-        if answer.lower() in zodiac_signs:
-            user_states[chat_id]['answers'].append(answer)
-            user_states[chat_id]['current_question'] += 1
-        else:
-            bot.send_message(chat_id, "такого нету :(")
-    # обработка пола
+        # вставлять в ряд по 4/3/2 зз
+        markup = types.InlineKeyboardMarkup(row_width=3)
+        for i in range(0, len(zodiac_signs), 3):
+            btn1 = types.InlineKeyboardButton(text=zodiac_signs[i], callback_data='zs:'+str(i))
+            btn2 = types.InlineKeyboardButton(text=zodiac_signs[i+1], callback_data='zs:'+str(i+1))
+            btn3 = types.InlineKeyboardButton(text=zodiac_signs[i+2], callback_data='zs:'+str(i+2))
+            # btn4 = types.InlineKeyboardButton(text=zodiac_signs[i+3], callback_data=zodiac_signs[i+3])
+            
+            markup.add(btn1, btn2, btn3)
+        bot.send_message(chat_id=chat_id, text=question, reply_markup=markup)
     elif user_states[chat_id]["current_question"] == 1:
-        if answer.lower() == "м":
-            user_states[chat_id]['answers'].append(0)
-            user_states[chat_id]['current_question'] += 1
-        elif answer.lower() == "ж":
-            user_states[chat_id]['answers'].append(1)
-            user_states[chat_id]['current_question'] += 1
-        else:
-            bot.send_message(chat_id, "м/ж")
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        btn1 = types.InlineKeyboardButton(text="М", callback_data="М")
+        btn2 = types.InlineKeyboardButton(text="Ж", callback_data="Ж")
+        markup.add(btn1, btn2)
+        bot.edit_message_text(chat_id=chat_id, message_id=message_id ,text=question, reply_markup=markup)
     else:
-        if answer.isdigit() and int(answer) in range(1,6):
-            user_states[chat_id]['answers'].append(answer)
-            user_states[chat_id]['current_question'] += 1
-        else:
-            # user_states[chat_id]["current_question"] -= 1
-            bot.send_message(chat_id, "Попробуй число от 1 до 5")
-        
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        for i in range(1, 4, 2):
+            btn1 = types.InlineKeyboardButton(text=str(i), callback_data=i)
+            btn2 = types.InlineKeyboardButton(text=str(i+1), callback_data=i+1)
+
+            markup.add(btn1, btn2)
+        btn = types.InlineKeyboardButton(text='5', callback_data=5)
+        markup.add(btn)
+
+        bot.edit_message_text(chat_id=chat_id, message_id=message_id ,text=question, reply_markup=markup)
+
+
+@bot.callback_query_handler(func= lambda callback: 'zs:' in callback.data)
+def check_callback_zodiac_sings(callback):
+    chat_id = callback.message.chat.id
+    callback_data = int( callback.data.split(':')[1] )
+    print(callback_data, zodiac_signs[callback_data])
+    user_states[chat_id]['answers'].append(callback_data)
+    user_states[chat_id]['current_question'] += 1
+    ask_next_question(chat_id, message_id=callback.message.id)
+
+
+@bot.callback_query_handler(func= lambda callback: callback.data in ["М", "Ж"])
+def check_callback_male(callback):
+    chat_id = callback.message.chat.id
+    callback_data = callback.data
+    if callback_data == "M":
+        user_states[chat_id]['answers'].append(0)
+    else :
+        user_states[chat_id]['answers'].append(1)
+    user_states[chat_id]['current_question'] += 1
+    ask_next_question(chat_id , message_id=callback.message.id)
+
+
+@bot.callback_query_handler(func= lambda callback: int(callback.data) in range(1, 6))
+def check_callback_questions(callback):
+    chat_id = callback.message.chat.id
+    callback_data = int(callback.data)
+    user_states[chat_id]['answers'].append(callback_data)
+    user_states[chat_id]['current_question'] += 1
+    ask_next_question(chat_id, message_id=callback.message.id)
+
 
 @bot.message_handler(func=lambda message: True)
 def handle_unrecognized_commands(message):
     bot.send_message(message.chat.id, "Извините, я не понимаю эту команду.")
+
 
 print("Starting...")
 bot.polling(none_stop=True)
